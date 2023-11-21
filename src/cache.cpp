@@ -7,6 +7,10 @@
 //========================================================//
 
 #include "cache.hpp"
+#include <set>
+#include <utility>
+#include <tuple>
+#include <map>
 
 //
 // TODO:Student Information
@@ -98,6 +102,9 @@ get_msb_index(uint32_t n)
   return index - 1;
 }
 
+std::set<std::tuple<struct cache_line *, uint32_t, uint32_t>> hasSeen;
+
+
 uint8_t
 access_cache(uint32_t addr, struct cache_line *cache, uint32_t index_mask, uint8_t index_bit, uint32_t assoc, uint32_t block_offset_bit, uint32_t update, uint32_t pre)
 {
@@ -107,6 +114,18 @@ access_cache(uint32_t addr, struct cache_line *cache, uint32_t index_mask, uint8
   struct cache_line *p = cache[index].next;
   struct cache_line *p_prev = NULL;
   uint32_t cnt = 0;
+
+  bool hasCompulsory_miss = false;
+
+  if(hasSeen.count(std::make_tuple(cache, index, tag)) == 0)
+  {
+    if (pre == 0)
+    {
+      compulsory_miss++;
+      hasCompulsory_miss = true;
+    }
+    hasSeen.insert(std::make_tuple(cache, index, tag));
+  }
 
   while (p != NULL)
   {
@@ -135,9 +154,7 @@ access_cache(uint32_t addr, struct cache_line *cache, uint32_t index_mask, uint8
 
   if (pre == 0)
   {
-    if (p_prev == NULL)
-      compulsory_miss++;
-    else
+    if(hasCompulsory_miss == false)
       other_miss++;
   }
 
@@ -310,10 +327,9 @@ uint32_t
 icache_prefetch_addr(uint32_t pc, uint32_t addr, char r_or_w)
 {
   return addr + icacheBlocksize; // Next line prefetching
-  //
-  //TODO: Implement a better prefetching strategy
-  //
 }
+
+std::map<uint32_t, std::pair<uint32_t, uint32_t>> dm;
 
 // Predict an address to prefetch on dcache with the information of last dcache access:
 // 'pc':     Program Counter of the instruction of last dcache access
@@ -322,10 +338,22 @@ icache_prefetch_addr(uint32_t pc, uint32_t addr, char r_or_w)
 uint32_t
 dcache_prefetch_addr(uint32_t pc, uint32_t addr, char r_or_w)
 {
-  return addr + dcacheBlocksize; // Next line prefetching
-  //
-  //TODO: Implement a better prefetching strategy
-  //
+  // return addr + dcacheBlocksize; // Next line prefetching
+  addr = (addr >> dcache_block_offset_bit) << dcache_block_offset_bit;
+  uint32_t prefetch_addr = addr + dcacheBlocksize;
+  if (dm.count(pc) == 0)
+  {
+    dm[pc] = std::make_pair(0, addr - dcacheBlocksize);
+  }
+  else
+  {
+    if ((addr - dm[pc].second) == (dm[pc].second - dm[pc].first))
+    {
+      prefetch_addr = addr + (addr - dm[pc].second);
+    }
+  }
+  dm[pc] = std::make_pair(dm[pc].second, addr);
+  return prefetch_addr;
 }
 
 // Perform a prefetch operation to I$ for the address 'addr'
@@ -338,6 +366,7 @@ icache_prefetch(uint32_t addr)
   }
 
   access_cache(addr, icache, icache_index_mask, icache_index_bit, icacheAssoc, icache_block_offset_bit, 1, 1);
+  access_cache(addr, l2cache, l2cache_index_mask, l2cache_index_bit, l2cacheAssoc, l2cache_block_offset_bit, 1, 1);
 }
 
 // Perform a prefetch operation to D$ for the address 'addr'
@@ -350,4 +379,5 @@ dcache_prefetch(uint32_t addr)
   }
 
   access_cache(addr, dcache, dcache_index_mask, dcache_index_bit, dcacheAssoc, dcache_block_offset_bit, 1, 1);
+  access_cache(addr, l2cache, l2cache_index_mask, l2cache_index_bit, l2cacheAssoc, l2cache_block_offset_bit, 1, 1);
 }
